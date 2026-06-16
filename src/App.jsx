@@ -240,7 +240,7 @@ function SetupScreen({ onComplete }) {
           <p style={{fontSize:13,color:C.muted,lineHeight:1.6}}>This app helps you capture case studies, social value activities, and contract records throughout the year — so when a tender arrives, your evidence is ready to go.</p>
         </div>
         <Field label="Your organisation name" required hint="This will appear on all exported documents.">
-          <Input value={orgName} onChange={e=>setOrgName(e.target.value)} placeholder="e.g. Care at Call Ltd" autoFocus />
+          <Input value={orgName} onChange={e=>setOrgName(e.target.value)} placeholder="e.g. Sunrise Care Services Ltd" autoFocus />
         </Field>
         <Field label="Which services do you deliver?" hint="Select all that apply. You can change this in Settings.">
           <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:4}}>
