@@ -1,0 +1,25 @@
+{
+  "short_name": "Evidence Vault",
+  "name": "BidElevate Evidence Vault",
+  "description": "Your year-round tender evidence bank",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#3e554f",
+  "background_color": "#f7f5f0",
+  "categories": ["business", "productivity"]
+}
