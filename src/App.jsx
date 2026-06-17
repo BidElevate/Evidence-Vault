@@ -684,7 +684,11 @@ function ContractTracker({db,org}){
   const [selected,setSelected]=useState([]);
   const [viewItem,setViewItem]=useState(null);
   const filtered=useMemo(()=>data.filter(r=>{const q=search.toLowerCase();return!q||[r.contract_name,r.commissioner,r.description,r.outcome].some(f=>f?.toLowerCase().includes(q));}),[data,search]);
-  const save=async f=>{if(editing){await update(f);}else{await insert(f);}setShowForm(false);setEditing(null);};
+  const save=async f=>{
+    const clean={...f, end_date: f.end_date||null, start_date: f.start_date||null};
+    if(editing){await update(clean);}else{await insert(clean);}
+    setShowForm(false);setEditing(null);
+  };
   const del=async id=>{if(window.confirm("Delete this contract record?")){await remove(id);setViewItem(null);}};
   const toggleSel=id=>setSelected(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
   const exportRows=selected.length?data.filter(r=>selected.includes(r.id)):filtered;
