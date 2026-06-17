@@ -685,7 +685,8 @@ function ContractTracker({db,org}){
   const [viewItem,setViewItem]=useState(null);
   const filtered=useMemo(()=>data.filter(r=>{const q=search.toLowerCase();return!q||[r.contract_name,r.commissioner,r.description,r.outcome].some(f=>f?.toLowerCase().includes(q));}),[data,search]);
   const save=async f=>{
-    const clean={...f, end_date: f.end_date||null, start_date: f.start_date||null};
+    const clean={};
+    Object.keys(f).forEach(k=>{ clean[k] = (f[k]==="" ? null : f[k]); });
     if(editing){await update(clean);}else{await insert(clean);}
     setShowForm(false);setEditing(null);
   };
