@@ -110,6 +110,24 @@ const fmt = d => d?new Date(d).toLocaleDateString("en-GB",{day:"2-digit",month:"
 const weeksBetween = (s,e) => { if(!s) return null; const diff=(( e?new Date(e):new Date())-new Date(s))/(1000*60*60*24*7); return Math.max(0,Math.round(diff)); };
 const formatCurrency = n => n?`£${n.toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2})}`:"";
 
+// Variable-hours helpers
+const startOfWeek = (d) => {
+  const date = new Date(d);
+  const day = date.getDay();
+  const diff = day === 0 ? -6 : 1 - day; // ISO week starting Monday
+  date.setDate(date.getDate() + diff);
+  date.setHours(0,0,0,0);
+  return date;
+};
+const addDays = (d, n) => { const date = new Date(d); date.setDate(date.getDate() + n); return date; };
+const fmtWeekRange = (start) => {
+  const s = new Date(start);
+  const e = addDays(s, 6);
+  const opts = { day: "numeric", month: "short" };
+  return `${s.toLocaleDateString("en-GB", opts)} – ${e.toLocaleDateString("en-GB", opts)}`;
+};
+const toISODate = (d) => new Date(d).toISOString().slice(0, 10);
+
 const SERVICE_TYPES = ["Domiciliary Care","Supported Living","Floating Support","Supported Accommodation","Residential Care","Children & Young People / SEND","Other"];
 const SV_CATEGORIES = ["Local Employment","Apprenticeships","Work Experience","Volunteering","Community Events","Charitable Donations","Environmental Initiatives","Staff Wellbeing","Other"];
 
@@ -122,7 +140,6 @@ async function requestNotificationPermission() {
 }
 
 function scheduleWeeklyCheck() {
-  // Check every hour if it's Monday 8:30am
   setInterval(() => {
     const now = new Date();
     if (now.getDay()===1 && now.getHours()===8 && now.getMinutes()<30) {
@@ -204,6 +221,47 @@ function useSupabaseTable(table, orgId) {
   return { data, loading, insert, update, remove };
 }
 
+// ── useContractWeeks hook (NEW — for variable-hours logging) ───────────────────
+function useContractWeeks(contractId, orgId) {
+  const [weeks, setWeeks] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    if (!contractId) return;
+    setLoading(true);
+    const { data } = await supabase
+      .from("contract_weeks")
+      .select("*")
+      .eq("contract_id", contractId)
+      .order("week_start", { ascending: true });
+    setWeeks(data || []);
+    setLoading(false);
+  }, [contractId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const saveWeek = async (weekStart, hours) => {
+    const iso = toISODate(weekStart);
+    const existing = weeks.find(w => w.week_start === iso);
+    if (existing) {
+      await supabase.from("contract_weeks").update({ hours }).eq("id", existing.id);
+      setWeeks(p => p.map(w => w.id === existing.id ? { ...w, hours } : w));
+    } else {
+      const { data } = await supabase.from("contract_weeks")
+        .insert([{ contract_id: contractId, org_id: orgId, week_start: iso, hours }])
+        .select();
+      if (data) setWeeks(p => [...p, data[0]].sort((a,b)=>new Date(a.week_start)-new Date(b.week_start)));
+    }
+  };
+
+  const deleteWeek = async (id) => {
+    await supabase.from("contract_weeks").delete().eq("id", id);
+    setWeeks(p => p.filter(w => w.id !== id));
+  };
+
+  return { weeks, loading, saveWeek, deleteWeek };
+}
+
 // ── SETUP SCREEN ──────────────────────────────────────────────────────────────
 function SetupScreen({ onComplete }) {
   const [orgName, setOrgName] = useState("");
@@ -216,11 +274,9 @@ function SetupScreen({ onComplete }) {
     setLoading(true);
     const orgId = uid();
     const org = { id: orgId, orgName: orgName.trim(), services };
-    // Save org to supabase
     await supabase.from("organisations").insert([org]);
     localStorage.setItem("be_org_id", orgId);
     localStorage.setItem("be_org", JSON.stringify(org));
-    // Request push notification permission
     await requestNotificationPermission();
     scheduleWeeklyCheck();
     onComplete(org);
@@ -447,19 +503,97 @@ function SocialValueVault({db,org}){
   </div>);
 }
 
+// ── WEEKLY LOG PANEL (NEW — variable hours logging) ─────────────────────────────
+function WeeklyLogPanel({ contract, orgId }) {
+  const { weeks, loading, saveWeek, deleteWeek } = useContractWeeks(contract.id, orgId);
+  const [hoursInput, setHoursInput] = useState("");
+
+  const rate = parseFloat(contract.hourly_rate) || 0;
+  const contractStart = contract.start_date ? startOfWeek(contract.start_date) : startOfWeek(new Date());
+
+  const nextWeekStart = useMemo(() => {
+    if (weeks.length === 0) return contractStart;
+    const lastLogged = new Date(weeks[weeks.length - 1].week_start);
+    return addDays(lastLogged, 7);
+  }, [weeks, contractStart]);
+
+  const totalHours = weeks.reduce((sum, w) => sum + (parseFloat(w.hours) || 0), 0);
+  const lifetimeValue = totalHours * rate;
+  const zeroWeeks = weeks.filter(w => parseFloat(w.hours) === 0).length;
+
+  const handleSave = async () => {
+    const hrs = parseFloat(hoursInput) || 0;
+    await saveWeek(nextWeekStart, hrs);
+    setHoursInput("");
+  };
+
+  if (loading) return <Spinner/>;
+
+  return (
+    <div style={{background:C.forestLt,border:`1.5px solid ${C.forest}`,borderRadius:14,padding:16,marginBottom:20}}>
+      <p style={{fontSize:13,fontWeight:700,color:C.forestDk,marginBottom:4}}>📊 Weekly hours log</p>
+      <p style={{fontSize:11,color:C.forestMd,marginBottom:14,lineHeight:1.5}}>
+        Hours per week vary for this contract. Log each week as it happens — enter 0 for any week with no delivery.
+      </p>
+
+      <div style={{background:C.white,border:`1.5px solid ${C.border}`,borderRadius:10,padding:14,marginBottom:14}}>
+        <p style={{fontSize:11,color:C.muted,marginBottom:4}}>Current week</p>
+        <p style={{fontSize:15,fontWeight:700,color:C.forestDk,marginBottom:12}}>{fmtWeekRange(nextWeekStart)}</p>
+        <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
+          <div style={{flex:1}}>
+            <label style={{fontSize:11,color:C.muted,display:"block",marginBottom:4}}>Hours delivered this week</label>
+            <Input type="number" min="0" step="0.5" value={hoursInput} onChange={e=>setHoursInput(e.target.value)} placeholder="0"/>
+          </div>
+          <Btn onClick={handleSave}>Save</Btn>
+        </div>
+        <p style={{fontSize:10,color:C.muted,marginTop:6}}>Enter 0 if no care was delivered this week — that's fine.</p>
+      </div>
+
+      {weeks.length > 0 && (
+        <div style={{marginBottom:14}}>
+          <p style={{fontSize:11,fontWeight:700,color:C.forestMd,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>Logged so far</p>
+          <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:180,overflowY:"auto"}}>
+            {[...weeks].reverse().map(w => (
+              <div key={w.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"6px 8px",background:C.white,borderRadius:6}}>
+                <span style={{color: parseFloat(w.hours)===0 ? C.muted : C.text}}>{fmtWeekRange(w.week_start)}</span>
+                <span style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontWeight:600, color: parseFloat(w.hours)===0 ? C.muted : C.forestDk}}>
+                    {w.hours} hrs{parseFloat(w.hours)===0 ? " — none delivered" : ""}
+                  </span>
+                  <button onClick={()=>deleteWeek(w.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:13}}>✕</button>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{background:C.white,borderRadius:10,padding:14,border:`1.5px solid ${C.forest}`}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+          <span style={{fontSize:11,color:C.muted}}>Weeks logged</span>
+          <span style={{fontSize:11,fontWeight:600}}>{weeks.length} ({zeroWeeks} at zero)</span>
+        </div>
+        <p style={{fontSize:11,fontWeight:700,color:C.forestMd,textTransform:"uppercase",letterSpacing:.5,marginBottom:2}}>Lifetime contract value to date</p>
+        <p style={{fontSize:26,fontWeight:800,color:C.forestDk,marginBottom:6}}>{formatCurrency(lifetimeValue)}</p>
+        <p style={{fontSize:11,color:C.muted,fontFamily:"monospace"}}>{totalHours} total hrs × £{rate} = {formatCurrency(lifetimeValue)}</p>
+      </div>
+    </div>
+  );
+}
+
 // ── CONTRACT TRACKER ──────────────────────────────────────────────────────────
 const CT_COLUMNS=[{key:"contract_name",label:"Contract Name"},{key:"commissioner",label:"Commissioner / Client"},{key:"client_ref",label:"Client Reference"},{key:"service_type",label:"Service Type"},{key:"client_needs",label:"Client Needs"},{key:"start_date",label:"Start Date"},{key:"end_date",label:"End Date"},{key:"weekly_hours",label:"Weekly Hours"},{key:"hourly_rate",label:"Hourly Rate (£)"},{key:"calculated_value",label:"Calculated Lifetime Value"},{key:"calculation",label:"Calculation"},{key:"framework_value",label:"Total Framework Value"},{key:"service_users",label:"Service Users Supported"},{key:"commissioner_contact",label:"Commissioner Contact"},{key:"description",label:"Description of Services"},{key:"outcome",label:"Outcome Achieved"}];
 
 function CTForm({initial,onSave,onCancel}){
-  const blank={contract_name:"",commissioner:"",client_ref:"",service_type:"",client_needs:"",start_date:"",end_date:"",weekly_hours:"",hourly_rate:"",calculated_value:"",calculation:"",framework_value:"",service_users:"",commissioner_contact:"",description:"",outcome:""};
+  const blank={contract_name:"",commissioner:"",client_ref:"",service_type:"",client_needs:"",start_date:"",end_date:"",weekly_hours:"",hourly_rate:"",calculated_value:"",calculation:"",framework_value:"",service_users:"",commissioner_contact:"",description:"",outcome:"",calc_mode:"fixed"};
   const [f,setF]=useState(initial||blank);
   const set=k=>e=>setF(p=>({...p,[k]:e.target.value}));
   const hours=parseFloat(f.weekly_hours)||0, rate=parseFloat(f.hourly_rate)||0, weeks=weeksBetween(f.start_date,f.end_date||null);
-  const hasCalc=hours>0&&rate>0&&weeks!==null&&weeks>0;
+  const hasCalc=f.calc_mode!=="variable"&&hours>0&&rate>0&&weeks!==null&&weeks>0;
   const weeklyVal=hours*rate, lifetimeVal=weeklyVal*weeks;
   const calcStr=hasCalc?`${hours} hrs × £${rate} × ${weeks} weeks = ${formatCurrency(lifetimeVal)}`:"";
-  useEffect(()=>{if(hasCalc)setF(p=>({...p,calculated_value:formatCurrency(lifetimeVal),calculation:calcStr}));},[f.weekly_hours,f.hourly_rate,f.start_date,f.end_date]);
-  const ok=f.contract_name&&f.commissioner&&(f.calculated_value||f.weekly_hours);
+  useEffect(()=>{if(hasCalc)setF(p=>({...p,calculated_value:formatCurrency(lifetimeVal),calculation:calcStr}));},[f.weekly_hours,f.hourly_rate,f.start_date,f.end_date,f.calc_mode]);
+  const ok=f.contract_name&&f.commissioner&&(f.calc_mode==="variable" ? f.hourly_rate : (f.calculated_value||f.weekly_hours));
   return(<div>
     <div style={{background:C.goldLt,border:`1px solid ${C.gold}`,borderRadius:10,padding:"12px 14px",marginBottom:20}}><p style={{fontSize:13,fontWeight:700,color:C.gold,marginBottom:2}}>⚠️ Framework value vs contract value</p><p style={{fontSize:12,color:"#7a5c00",lineHeight:1.5}}>Record what <strong>your organisation</strong> delivered — not the total framework value. Use the calculator below to get your auditable contract reference value.</p></div>
     <Field label="Contract Name" required><Input value={f.contract_name} onChange={set("contract_name")} placeholder="e.g. Domiciliary Care Framework — Lot 2"/></Field>
@@ -473,28 +607,66 @@ function CTForm({initial,onSave,onCancel}){
       <Field label="Start Date" required><Input type="date" value={f.start_date} onChange={set("start_date")}/></Field>
       <Field label="End Date" hint="Leave blank if ongoing."><Input type="date" value={f.end_date} onChange={set("end_date")}/></Field>
     </div>
-    <div style={{background:C.forestLt,border:`1.5px solid ${C.forest}`,borderRadius:14,padding:"16px",marginBottom:20}}>
-      <p style={{fontSize:13,fontWeight:700,color:C.forestDk,marginBottom:8}}>📊 Contract Value Calculator</p>
-      <p style={{fontSize:11,color:C.forestMd,marginBottom:12,lineHeight:1.5}}>Hours per week × Hourly rate × Total weeks = your auditable contract reference value</p>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-        <Field label="Weekly Hours"><Input type="number" value={f.weekly_hours} onChange={set("weekly_hours")} placeholder="e.g. 14" min="0" step="0.5"/></Field>
-        <Field label="Hourly Rate (£)"><Input type="number" value={f.hourly_rate} onChange={set("hourly_rate")} placeholder="e.g. 21.50" min="0" step="0.01"/></Field>
+
+    <div style={{marginBottom:8}}>
+      <label style={{display:"block",fontSize:13,fontWeight:600,color:C.forestDk,marginBottom:6}}>How are hours delivered for this contract?</label>
+      <div style={{display:"flex",gap:0,border:`1.5px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
+        <button type="button" onClick={()=>setF(p=>({...p,calc_mode:"fixed"}))}
+          style={{flex:1,border:"none",padding:"10px",fontSize:12,fontWeight:600,cursor:"pointer",
+          background:f.calc_mode!=="variable"?C.forest:C.white, color:f.calc_mode!=="variable"?C.white:C.muted}}>
+          Consistent weekly hours
+        </button>
+        <button type="button" onClick={()=>setF(p=>({...p,calc_mode:"variable"}))}
+          style={{flex:1,border:"none",padding:"10px",fontSize:12,fontWeight:600,cursor:"pointer",
+          background:f.calc_mode==="variable"?C.forest:C.white, color:f.calc_mode==="variable"?C.white:C.muted,
+          borderLeft:`1.5px solid ${C.border}`}}>
+          Variable hours
+        </button>
       </div>
-      {hasCalc?(
-        <div style={{background:C.white,borderRadius:10,padding:"14px",border:`1.5px solid ${C.forest}`}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
-            <div><p style={{fontSize:11,fontWeight:700,color:C.forestMd,textTransform:"uppercase",letterSpacing:.5}}>Lifetime Contract Value</p><p style={{fontSize:28,fontWeight:800,color:C.forestDk,lineHeight:1.1}}>{formatCurrency(lifetimeVal)}</p></div>
-            <div style={{textAlign:"right"}}><p style={{fontSize:11,color:C.muted}}>Weekly value</p><p style={{fontSize:16,fontWeight:700,color:C.forest}}>{formatCurrency(weeklyVal)}</p></div>
-          </div>
-          <div style={{background:C.forestLt,borderRadius:8,padding:"8px 10px"}}>
-            <p style={{fontSize:11,color:C.forestDk,fontFamily:"monospace"}}>{hours} hrs × £{rate} × {weeks} weeks = {formatCurrency(lifetimeVal)}</p>
-            <p style={{fontSize:10,color:C.muted,marginTop:2}}>{f.end_date?`${fmt(f.start_date)} → ${fmt(f.end_date)}`:`${fmt(f.start_date)} → today (${weeks} weeks so far)`}</p>
-          </div>
-        </div>
-      ):(
-        <div style={{background:C.white,borderRadius:10,padding:"14px",border:`1.5px dashed ${C.border}`,textAlign:"center"}}><p style={{fontSize:13,color:C.muted}}>Enter hours, rate and dates above to calculate</p></div>
-      )}
+      <p style={{fontSize:11,color:C.muted,marginTop:6,lineHeight:1.5}}>
+        {f.calc_mode==="variable"
+          ? "Use this if hours change week to week (e.g. needs-based care, reviews, breaks in delivery)."
+          : "Use this if the same number of hours is delivered every week."}
+      </p>
     </div>
+
+    {f.calc_mode!=="variable" && (
+      <div style={{background:C.forestLt,border:`1.5px solid ${C.forest}`,borderRadius:14,padding:"16px",marginBottom:20}}>
+        <p style={{fontSize:13,fontWeight:700,color:C.forestDk,marginBottom:8}}>📊 Contract Value Calculator</p>
+        <p style={{fontSize:11,color:C.forestMd,marginBottom:12,lineHeight:1.5}}>Hours per week × Hourly rate × Total weeks = your auditable contract reference value</p>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+          <Field label="Weekly Hours"><Input type="number" value={f.weekly_hours} onChange={set("weekly_hours")} placeholder="e.g. 14" min="0" step="0.5"/></Field>
+          <Field label="Hourly Rate (£)"><Input type="number" value={f.hourly_rate} onChange={set("hourly_rate")} placeholder="e.g. 21.50" min="0" step="0.01"/></Field>
+        </div>
+        {hasCalc?(
+          <div style={{background:C.white,borderRadius:10,padding:"14px",border:`1.5px solid ${C.forest}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
+              <div><p style={{fontSize:11,fontWeight:700,color:C.forestMd,textTransform:"uppercase",letterSpacing:.5}}>Lifetime Contract Value</p><p style={{fontSize:28,fontWeight:800,color:C.forestDk,lineHeight:1.1}}>{formatCurrency(lifetimeVal)}</p></div>
+              <div style={{textAlign:"right"}}><p style={{fontSize:11,color:C.muted}}>Weekly value</p><p style={{fontSize:16,fontWeight:700,color:C.forest}}>{formatCurrency(weeklyVal)}</p></div>
+            </div>
+            <div style={{background:C.forestLt,borderRadius:8,padding:"8px 10px"}}>
+              <p style={{fontSize:11,color:C.forestDk,fontFamily:"monospace"}}>{hours} hrs × £{rate} × {weeks} weeks = {formatCurrency(lifetimeVal)}</p>
+              <p style={{fontSize:10,color:C.muted,marginTop:2}}>{f.end_date?`${fmt(f.start_date)} → ${fmt(f.end_date)}`:`${fmt(f.start_date)} → today (${weeks} weeks so far)`}</p>
+            </div>
+          </div>
+        ):(
+          <div style={{background:C.white,borderRadius:10,padding:"14px",border:`1.5px dashed ${C.border}`,textAlign:"center"}}><p style={{fontSize:13,color:C.muted}}>Enter hours, rate and dates above to calculate</p></div>
+        )}
+      </div>
+    )}
+
+    {f.calc_mode==="variable" && (
+      <div style={{background:C.goldLt,border:`1px solid ${C.gold}`,borderRadius:10,padding:"12px 14px",marginBottom:20}}>
+        <p style={{fontSize:12,color:"#7a5c00",lineHeight:1.5,marginBottom:12}}>
+          Hours vary week to week for this contract. Set the hourly rate below, save this
+          contract, then log hours week by week from the contract's detail screen.
+        </p>
+        <Field label="Hourly Rate (£)" required>
+          <Input type="number" value={f.hourly_rate} onChange={set("hourly_rate")} placeholder="e.g. 21.64" min="0" step="0.01"/>
+        </Field>
+      </div>
+    )}
+
     <Field label="Total Framework Value (optional)" hint="The headline value across all providers — not your value alone."><Input value={f.framework_value} onChange={set("framework_value")} placeholder="e.g. £2,400,000"/></Field>
     <Field label="Number of Service Users Supported"><Input type="number" value={f.service_users} onChange={set("service_users")} placeholder="e.g. 24"/></Field>
     <Field label="Commissioner Contact" hint="Name and role of the council officer who placed the referral."><Input value={f.commissioner_contact} onChange={set("commissioner_contact")} placeholder="e.g. J. Smith, Contracts Manager, Sandwell MBC"/></Field>
@@ -525,9 +697,9 @@ function ContractTracker({db,org}){
     </div>
     <SearchBar value={search} onChange={setSearch} placeholder="Search contracts…"/>
     {selected.length>0&&(<div style={{background:C.goldLt,border:`1px solid ${C.gold}`,borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}><span style={{fontSize:13,color:C.gold,fontWeight:600}}>{selected.length} selected</span><Btn onClick={()=>generatePDF("Contract Tracker",`${selected.length} selected`,data.filter(r=>selected.includes(r.id)).map(r=>({...r,start_date:fmt(r.start_date),end_date:fmt(r.end_date)})),CT_COLUMNS,org.orgName)} size="sm" variant="secondary">Export PDF</Btn><button onClick={()=>setSelected([])} style={{marginLeft:"auto",background:"none",border:"none",fontSize:12,color:C.muted,cursor:"pointer"}}>Clear</button></div>)}
-    {filtered.length===0?(<EmptyState icon="📄" title={data.length===0?"No contracts recorded yet":"No results"} sub={data.length===0?"Record contracts as you deliver them. Accurate contract values are essential for tender submissions.":"Try adjusting your search."} action={data.length===0&&<Btn onClick={()=>setShowForm(true)} size="lg">Add your first contract</Btn>}/>):(<div style={{display:"flex",flexDirection:"column",gap:10}}><span style={{fontSize:12,color:C.muted}}>{filtered.length} record{filtered.length!==1?"s":""}</span>{filtered.map(r=>(<div key={r.id} onClick={()=>setViewItem(r)} style={{background:C.white,borderRadius:14,border:`1.5px solid ${selected.includes(r.id)?C.forest:C.border}`,padding:"14px 16px",cursor:"pointer"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}><div style={{flex:1,minWidth:0}}><p style={{fontSize:15,fontWeight:700,color:C.forestDk,marginBottom:2}}>{r.contract_name}</p><p style={{fontSize:13,color:C.muted,marginBottom:6}}>{r.commissioner}</p>{r.calculated_value&&(<div style={{background:C.forestLt,borderRadius:8,padding:"8px 10px",marginBottom:6,display:"inline-block"}}><p style={{fontSize:11,color:C.forestMd,fontWeight:600}}>Lifetime Contract Value</p><p style={{fontSize:20,fontWeight:800,color:C.forestDk}}>{r.calculated_value}</p>{r.calculation&&<p style={{fontSize:10,color:C.muted,fontFamily:"monospace",marginTop:2}}>{r.calculation}</p>}</div>)}<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{r.service_type&&<Badge color={C.forest}>{r.service_type}</Badge>}{r.service_users&&<Badge color={C.forestMd}>{r.service_users} service users</Badge>}{r.start_date&&<span style={{fontSize:11,color:C.muted,fontFamily:"monospace"}}>{fmt(r.start_date)} → {r.end_date?fmt(r.end_date):"ongoing"}</span>}</div></div><input type="checkbox" checked={selected.includes(r.id)} onChange={e=>{e.stopPropagation();toggleSel(r.id);}} style={{width:18,height:18,accentColor:C.forest,flexShrink:0}} onClick={e=>e.stopPropagation()}/></div></div>))}</div>)}
+    {filtered.length===0?(<EmptyState icon="📄" title={data.length===0?"No contracts recorded yet":"No results"} sub={data.length===0?"Record contracts as you deliver them. Accurate contract values are essential for tender submissions.":"Try adjusting your search."} action={data.length===0&&<Btn onClick={()=>setShowForm(true)} size="lg">Add your first contract</Btn>}/>):(<div style={{display:"flex",flexDirection:"column",gap:10}}><span style={{fontSize:12,color:C.muted}}>{filtered.length} record{filtered.length!==1?"s":""}</span>{filtered.map(r=>(<div key={r.id} onClick={()=>setViewItem(r)} style={{background:C.white,borderRadius:14,border:`1.5px solid ${selected.includes(r.id)?C.forest:C.border}`,padding:"14px 16px",cursor:"pointer"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}><div style={{flex:1,minWidth:0}}><p style={{fontSize:15,fontWeight:700,color:C.forestDk,marginBottom:2}}>{r.contract_name}</p><p style={{fontSize:13,color:C.muted,marginBottom:6}}>{r.commissioner}</p>{r.calc_mode==="variable"?(<div style={{background:C.forestLt,borderRadius:8,padding:"6px 10px",marginBottom:6,display:"inline-block"}}><Badge color={C.gold}>Variable hours — see detail</Badge></div>):r.calculated_value&&(<div style={{background:C.forestLt,borderRadius:8,padding:"8px 10px",marginBottom:6,display:"inline-block"}}><p style={{fontSize:11,color:C.forestMd,fontWeight:600}}>Lifetime Contract Value</p><p style={{fontSize:20,fontWeight:800,color:C.forestDk}}>{r.calculated_value}</p>{r.calculation&&<p style={{fontSize:10,color:C.muted,fontFamily:"monospace",marginTop:2}}>{r.calculation}</p>}</div>)}<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{r.service_type&&<Badge color={C.forest}>{r.service_type}</Badge>}{r.service_users&&<Badge color={C.forestMd}>{r.service_users} service users</Badge>}{r.start_date&&<span style={{fontSize:11,color:C.muted,fontFamily:"monospace"}}>{fmt(r.start_date)} → {r.end_date?fmt(r.end_date):"ongoing"}</span>}</div></div><input type="checkbox" checked={selected.includes(r.id)} onChange={e=>{e.stopPropagation();toggleSel(r.id);}} style={{width:18,height:18,accentColor:C.forest,flexShrink:0}} onClick={e=>e.stopPropagation()}/></div></div>))}</div>)}
     <Modal open={showForm||!!editing} onClose={()=>{setShowForm(false);setEditing(null);}} title={editing?"Edit Contract":"New Contract Record"}><CTForm initial={editing} onSave={save} onCancel={()=>{setShowForm(false);setEditing(null);}}/></Modal>
-    <Modal open={!!viewItem} onClose={()=>setViewItem(null)} title="Contract Record">{viewItem&&(<div><p style={{fontSize:18,fontWeight:700,color:C.forestDk,marginBottom:2}}>{viewItem.contract_name}</p><p style={{fontSize:14,color:C.muted,marginBottom:16}}>{viewItem.commissioner}</p>{viewItem.calculated_value&&(<div style={{background:`linear-gradient(135deg, ${C.forestDk}, ${C.forest})`,borderRadius:14,padding:"16px",marginBottom:20,color:C.white}}><p style={{fontSize:11,fontWeight:600,color:"#a8c5bc",textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>Auditable Contract Reference Value</p><p style={{fontSize:32,fontWeight:800,lineHeight:1,marginBottom:8}}>{viewItem.calculated_value}</p>{viewItem.calculation&&(<div style={{background:"rgba(255,255,255,.1)",borderRadius:8,padding:"8px 10px"}}><p style={{fontSize:11,fontFamily:"monospace",color:"#c8ddd8"}}>{viewItem.calculation}</p></div>)}</div>)}{CT_COLUMNS.filter(c=>!["contract_name","commissioner","calculated_value","calculation"].includes(c.key)).map(col=>viewItem[col.key]&&(<div key={col.key} style={{marginBottom:14}}><p style={{fontSize:11,fontWeight:700,color:C.forestMd,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>{col.label}</p><p style={{fontSize:14,color:C.text,lineHeight:1.6,fontFamily:["start_date","end_date"].includes(col.key)?"monospace":"inherit"}}>{["start_date","end_date"].includes(col.key)?fmt(viewItem[col.key]):viewItem[col.key]}</p></div>))}<div style={{display:"flex",gap:8,marginTop:20}}><Btn onClick={()=>{setViewItem(null);setEditing(viewItem);}} variant="secondary" style={{flex:1}}>✏️ Edit</Btn><Btn onClick={()=>del(viewItem.id)} variant="danger">Delete</Btn></div></div>)}</Modal>
+    <Modal open={!!viewItem} onClose={()=>setViewItem(null)} title="Contract Record">{viewItem&&(<div><p style={{fontSize:18,fontWeight:700,color:C.forestDk,marginBottom:2}}>{viewItem.contract_name}</p><p style={{fontSize:14,color:C.muted,marginBottom:16}}>{viewItem.commissioner}</p>{viewItem.calc_mode!=="variable"&&viewItem.calculated_value&&(<div style={{background:`linear-gradient(135deg, ${C.forestDk}, ${C.forest})`,borderRadius:14,padding:"16px",marginBottom:20,color:C.white}}><p style={{fontSize:11,fontWeight:600,color:"#a8c5bc",textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>Auditable Contract Reference Value</p><p style={{fontSize:32,fontWeight:800,lineHeight:1,marginBottom:8}}>{viewItem.calculated_value}</p>{viewItem.calculation&&(<div style={{background:"rgba(255,255,255,.1)",borderRadius:8,padding:"8px 10px"}}><p style={{fontSize:11,fontFamily:"monospace",color:"#c8ddd8"}}>{viewItem.calculation}</p></div>)}</div>)}{viewItem.calc_mode==="variable"&&(<WeeklyLogPanel contract={viewItem} orgId={org.id}/>)}{CT_COLUMNS.filter(c=>!["contract_name","commissioner","calculated_value","calculation"].includes(c.key)).map(col=>viewItem[col.key]&&(<div key={col.key} style={{marginBottom:14}}><p style={{fontSize:11,fontWeight:700,color:C.forestMd,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>{col.label}</p><p style={{fontSize:14,color:C.text,lineHeight:1.6,fontFamily:["start_date","end_date"].includes(col.key)?"monospace":"inherit"}}>{["start_date","end_date"].includes(col.key)?fmt(viewItem[col.key]):viewItem[col.key]}</p></div>))}<div style={{display:"flex",gap:8,marginTop:20}}><Btn onClick={()=>{setViewItem(null);setEditing(viewItem);}} variant="secondary" style={{flex:1}}>✏️ Edit</Btn><Btn onClick={()=>del(viewItem.id)} variant="danger">Delete</Btn></div></div>)}</Modal>
   </div>);
 }
 
@@ -596,7 +768,6 @@ export default function App(){
     return()=>document.head.removeChild(style);
   },[]);
 
-  // Load org from localStorage on boot
   useEffect(()=>{
     const stored=localStorage.getItem("be_org");
     if(stored){
