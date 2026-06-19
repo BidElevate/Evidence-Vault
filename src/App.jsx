@@ -849,7 +849,7 @@ export default function App(){
         </div>
       </div>
       {tab===0 && (
-        <div style={{display:"flex",justifyContent:"center",marginTop:-28,position:"relative",zIndex:99}}>
+        <div style={{display:"flex",justifyContent:"center",marginTop:-28,position:"relative",zIndex:101}}>
           <div style={{width:56,height:56,borderRadius:14,background:C.white,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 8px rgba(0,0,0,0.18)"}}>
             <img src="https://bidelevate.co.uk/wp-content/uploads/2026/05/BidElevate-Logo.png" alt="BidElevate" style={{height:32,width:"auto"}}/>
           </div>
