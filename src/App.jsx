@@ -842,18 +842,20 @@ export default function App(){
 
   return(
     <div style={{maxWidth:480,margin:"0 auto",minHeight:"100vh",display:"flex",flexDirection:"column",background:C.warm}}>
-      <div style={{background:C.forestDk,padding:"18px 20px 36px",position:"sticky",top:0,zIndex:100}}>
+      <div style={{background:C.forestDk,padding:tab===0?"18px 20px 36px":"18px 20px 14px",position:"sticky",top:0,zIndex:100}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <p style={{fontSize:18,fontWeight:800,color:C.white,lineHeight:1.2}}>{TABS[tab].icon} {tab===0?"Evidence Vault":TABS[tab].label}</p>
+          <p style={{fontSize:18,fontWeight:800,color:C.white,lineHeight:1.2}}>{tab===0?"Evidence Vault":TABS[tab].label}</p>
           <button onClick={()=>setShowSettings(true)} style={{background:"rgba(255,255,255,.1)",border:"none",borderRadius:10,padding:"8px 12px",color:"#a8c5bc",fontSize:12,fontWeight:600,cursor:"pointer"}}>⚙️ {org.orgName?.split(" ")[0]}</button>
         </div>
       </div>
-      <div style={{display:"flex",justifyContent:"center",marginTop:-28,position:"relative",zIndex:99}}>
-        <div style={{width:56,height:56,borderRadius:14,background:C.white,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 8px rgba(0,0,0,0.18)"}}>
-          <img src="https://bidelevate.co.uk/wp-content/uploads/2026/05/BidElevate-Logo.png" alt="BidElevate" style={{height:32,width:"auto"}}/>
+      {tab===0 && (
+        <div style={{display:"flex",justifyContent:"center",marginTop:-28,position:"relative",zIndex:99}}>
+          <div style={{width:56,height:56,borderRadius:14,background:C.white,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 8px rgba(0,0,0,0.18)"}}>
+            <img src="https://bidelevate.co.uk/wp-content/uploads/2026/05/BidElevate-Logo.png" alt="BidElevate" style={{height:32,width:"auto"}}/>
+          </div>
         </div>
-      </div>
-      <div style={{flex:1,padding:"24px 16px 0",overflowY:"auto"}}>{TABS[tab].content}</div>
+      )}
+      <div style={{flex:1,padding:tab===0?"24px 16px 0":"20px 16px 0",overflowY:"auto"}}>{TABS[tab].content}</div>
       <div style={{background:C.white,borderTop:`1px solid ${C.border}`,display:"grid",gridTemplateColumns:"repeat(4,1fr)",position:"sticky",bottom:0,zIndex:100}}>
         {TABS.map((t,i)=>(
           <button key={i} onClick={()=>setTab(i)} style={{background:"none",border:"none",padding:"10px 4px 12px",display:"flex",flexDirection:"column",alignItems:"center",gap:3,cursor:"pointer",borderTop:`2.5px solid ${tab===i?C.forest:"transparent"}`}}>
