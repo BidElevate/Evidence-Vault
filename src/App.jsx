@@ -285,12 +285,16 @@ function SetupScreen({ onComplete }) {
 
   return (
     <div style={{minHeight:"100vh",background:C.warm,display:"flex",flexDirection:"column"}}>
-      <div style={{background:C.forestDk,padding:"32px 24px 28px"}}>
-        <img src="https://bidelevate.co.uk/wp-content/uploads/2026/05/BidElevate-Logo.png" alt="BidElevate" style={{height:36,marginBottom:8}}/>
+      <div style={{background:C.forestDk,padding:"32px 24px 40px"}}>
         <p style={{fontSize:26,fontWeight:800,color:C.white,lineHeight:1.2,marginBottom:8}}>Evidence Vault</p>
         <p style={{fontSize:14,color:"#a8c5bc",lineHeight:1.5}}>Your year-round tender evidence bank. Let's get you set up — it takes less than a minute.</p>
       </div>
-      <div style={{flex:1,padding:"28px 20px 40px",overflowY:"auto"}}>
+      <div style={{display:"flex",justifyContent:"center",marginTop:-32,position:"relative",zIndex:5}}>
+        <div style={{width:64,height:64,borderRadius:16,background:C.white,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 8px rgba(0,0,0,0.18)"}}>
+          <img src="https://bidelevate.co.uk/wp-content/uploads/2026/05/BidElevate-Logo.png" alt="BidElevate" style={{height:36,width:"auto"}}/>
+        </div>
+      </div>
+      <div style={{flex:1,padding:"24px 20px 40px",overflowY:"auto"}}>
         <div style={{background:C.white,borderRadius:16,border:`1.5px solid ${C.border}`,padding:"20px 18px",marginBottom:24}}>
           <p style={{fontSize:15,fontWeight:700,color:C.forestDk,marginBottom:8}}>👋 Welcome to Evidence Vault</p>
           <p style={{fontSize:13,color:C.muted,lineHeight:1.6}}>This app helps you capture case studies, social value activities, and contract records throughout the year — so when a tender arrives, your evidence is ready to go.</p>
@@ -838,16 +842,18 @@ export default function App(){
 
   return(
     <div style={{maxWidth:480,margin:"0 auto",minHeight:"100vh",display:"flex",flexDirection:"column",background:C.warm}}>
-      <div style={{background:C.forestDk,padding:"16px 20px 14px",position:"sticky",top:0,zIndex:100}}>
+      <div style={{background:C.forestDk,padding:"18px 20px 36px",position:"sticky",top:0,zIndex:100}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <div>
-            <img src="https://bidelevate.co.uk/wp-content/uploads/2026/05/BidElevate-Logo.png" alt="BidElevate" style={{height:28,marginBottom:2}}/>
-            <p style={{fontSize:18,fontWeight:800,color:C.white,lineHeight:1.2}}>{TABS[tab].icon} {tab===0?"Evidence Vault":TABS[tab].label}</p>
-          </div>
+          <p style={{fontSize:18,fontWeight:800,color:C.white,lineHeight:1.2}}>{TABS[tab].icon} {tab===0?"Evidence Vault":TABS[tab].label}</p>
           <button onClick={()=>setShowSettings(true)} style={{background:"rgba(255,255,255,.1)",border:"none",borderRadius:10,padding:"8px 12px",color:"#a8c5bc",fontSize:12,fontWeight:600,cursor:"pointer"}}>⚙️ {org.orgName?.split(" ")[0]}</button>
         </div>
       </div>
-      <div style={{flex:1,padding:"20px 16px 0",overflowY:"auto"}}>{TABS[tab].content}</div>
+      <div style={{display:"flex",justifyContent:"center",marginTop:-28,position:"relative",zIndex:99}}>
+        <div style={{width:56,height:56,borderRadius:14,background:C.white,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 8px rgba(0,0,0,0.18)"}}>
+          <img src="https://bidelevate.co.uk/wp-content/uploads/2026/05/BidElevate-Logo.png" alt="BidElevate" style={{height:32,width:"auto"}}/>
+        </div>
+      </div>
+      <div style={{flex:1,padding:"24px 16px 0",overflowY:"auto"}}>{TABS[tab].content}</div>
       <div style={{background:C.white,borderTop:`1px solid ${C.border}`,display:"grid",gridTemplateColumns:"repeat(4,1fr)",position:"sticky",bottom:0,zIndex:100}}>
         {TABS.map((t,i)=>(
           <button key={i} onClick={()=>setTab(i)} style={{background:"none",border:"none",padding:"10px 4px 12px",display:"flex",flexDirection:"column",alignItems:"center",gap:3,cursor:"pointer",borderTop:`2.5px solid ${tab===i?C.forest:"transparent"}`}}>
